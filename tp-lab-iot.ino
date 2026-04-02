@@ -3,6 +3,9 @@
 #include "Seeed_TMG3993_v2.hpp"
 #include <HT_SSD1306Wire.h>
 #include <Wire.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include "secrets.h"
 
 // Pins BME680 en SPI
 #define BME_SCK 36   // 9
@@ -21,6 +24,29 @@
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 TMG3993 tmg3993(&Wire1);
 static SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
+
+// Embedded web server
+WebServer server(80);
+String latestJson = "{}";
+bool webServerEnabled = false;
+
+void handleRoot() {
+    String body = "Serveur IoT actif\n";
+    body += "Endpoint JSON: /json\n";
+    if (WiFi.status() == WL_CONNECTED) {
+        body += "IP: " + WiFi.localIP().toString() + "\n";
+    }
+    server.send(200, "text/plain; charset=utf-8", body);
+}
+void handleJson() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", latestJson);
+}
+void handleNotFound() {
+    server.send(404, "application/json", "{\"error\":\"not_found\"}");
+}
+
+// ----------------------- SETUP & LOOP ----------------------
 
 void setup() {
     // --- Serial initialization
@@ -60,11 +86,43 @@ void setup() {
     tmg3993.setADCIntegrationTime(0xdb);  // the integration time: 103ms
     tmg3993.enableEngines(ENABLE_PON | ENABLE_PEN | ENABLE_PIEN | ENABLE_AEN | ENABLE_AIEN);
 
+    // --- Wi-Fi + embedded web server initialization
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    Serial.print("Connexion Wi-Fi");
+    const unsigned long timeoutMs = 20000;
+    const unsigned long startMs = millis();
+
+    while (WiFi.status() != WL_CONNECTED && (millis() - startMs) < timeoutMs) {
+        Serial.print(".");
+        delay(500);
+    }
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        server.on("/", HTTP_GET, handleRoot);
+        server.on("/json", HTTP_GET, handleJson);
+        server.onNotFound(handleNotFound);
+        server.begin();
+        webServerEnabled = true;
+
+        Serial.print("Wi-Fi connecte, IP: ");
+        Serial.println(WiFi.localIP());
+        Serial.println("Serveur web demarre sur le port 80");
+    } else {
+        Serial.println("Wi-Fi non connecte, serveur web désactivé");
+    }
+
     // --- End of setup
     Serial.println("SETUP_COMPLETE");
 }
 
 void loop() {
+    if (webServerEnabled) {
+        server.handleClient();
+    }
+
     display.clear();
 
     // ----------------------- GET READINGS -----------------------
@@ -131,6 +189,13 @@ void loop() {
         display.drawString(0, 0, "BME680 reading failed");
     }
 
+    // Wi-Fi status
+    if (WiFi.status() == WL_CONNECTED) {
+        display.drawString(0, 40, WiFi.localIP().toString());
+    } else {
+        display.drawString(0, 40, "Wi-Fi: OFF");
+    }
+
     // TMG3993 Proximity
     if (tmg3993_proximity) {
         display.drawString(0, 50, "Proximity: " + String(tmg3993_proximity_raw));
@@ -150,6 +215,13 @@ void loop() {
         display.drawString(127, 30, String(tmg3993_cct) + " K");
     } else {
         display.drawString(127, 0, "Color reading failed");
+    }
+
+    // Web server status
+    if (webServerEnabled) {
+        display.drawString(127, 40, "Web: ON");
+    } else {
+        display.drawString(127, 40, "Web: OFF");
     }
 
     // Heartbeat
@@ -204,6 +276,6 @@ void loop() {
     // ------------------------ SERIAL OUTPUT -----------------------
     Serial.println(json);
 
-    // ------------------------ LORA OUTPUT -----------------------
-
+    // ------------------------ WEB OUTPUT -----------------------
+    latestJson = json;
 }

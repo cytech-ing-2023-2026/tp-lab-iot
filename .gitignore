@@ -1,2 +1,5 @@
 # Ignore Visual Studio Code settings folder
 .vscode/
+
+# Local Wi-Fi secrets
+secrets.h
