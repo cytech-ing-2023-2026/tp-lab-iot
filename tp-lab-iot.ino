@@ -9,6 +9,8 @@
 #define BME_MISO 37  // 4
 #define BME_CS 34    // 11
 
+#define HB_PIN 1
+
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 TMG3993 tmg3993;
 
@@ -48,32 +50,31 @@ void setup() {
     tmg3993.enableEngines(ENABLE_PON | ENABLE_PEN | ENABLE_PIEN | ENABLE_AEN | ENABLE_AIEN);
 }
 
+int sum = 0;
+int i = 1;
+
 void loop() {
     Serial.println("======================================================");
 
     // BME680 reading
 
-    if (!bme.performReading()) {
-        Serial.println("Erreur lecture BME680");
-        delay(1000);
-        return;
+    if (bme.performReading()) {
+        Serial.print("Temperature: ");
+        Serial.print(bme.temperature);
+        Serial.println(" C");
+
+        Serial.print("Humidite: ");
+        Serial.print(bme.humidity);
+        Serial.println(" %");
+
+        Serial.print("Pression: ");
+        Serial.print(bme.pressure / 100.0);
+        Serial.println(" hPa");
+
+        Serial.print("Gaz: ");
+        Serial.print(bme.gas_resistance / 1000.0);
+        Serial.println(" kOhm");
     }
-
-    Serial.print("Temperature: ");
-    Serial.print(bme.temperature);
-    Serial.println(" C");
-
-    Serial.print("Humidite: ");
-    Serial.print(bme.humidity);
-    Serial.println(" %");
-
-    Serial.print("Pression: ");
-    Serial.print(bme.pressure / 100.0);
-    Serial.println(" hPa");
-
-    Serial.print("Gaz: ");
-    Serial.print(bme.gas_resistance / 1000.0);
-    Serial.println(" kOhm");
 
     Serial.println();
 
@@ -86,25 +87,11 @@ void loop() {
         Serial.print("Proximity Raw : ");
         Serial.println(proximity_raw);
 
-        /*if (proximity_raw >= 150 && last_interrupt_state != 1) {
-            Serial.println("Proximity detected!!!");
-            Serial.print("Proximity Raw: ");
-            Serial.println(proximity_raw);
-            last_interrupt_state = 1;
-        } else if (proximity_raw <= 25 && last_interrupt_state != 0) {
-            Serial.println("Proximity removed!!!");
-            Serial.print("Proximity Raw: ");
-            Serial.println(proximity_raw);
-            last_interrupt_state = 0;
-        }*/
-
         // don't forget to clear the interrupt bits
         tmg3993.clearProximityInterrupts();
-    } else {
-        Serial.println("TMG3993: No new proximity data");
     }
 
-    println();
+    Serial.println();
 
     // Color
     if (tmg3993.getSTATUS() & STATUS_AVALID) {
@@ -130,8 +117,18 @@ void loop() {
         Serial.println(cct);
         // don't forget to clear the interrupt bits
         tmg3993.clearALSInterrupts();
-    } else {
-        Serial.println("TMG3993: No new data");
+    }
+
+    Serial.println();
+
+    sum += analogReadMilliVolts(HB_PIN);
+    i++;
+
+    if(i == 10) {
+        Serial.print("Heart Beat (mV) (mean) : ");
+        Serial.println(sum / 10.0);
+        i = 0;
+        sum = 0;
     }
 
     delay(500);
