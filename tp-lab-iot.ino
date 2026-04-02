@@ -1,6 +1,7 @@
 #include <Adafruit_BME680.h>
 #include <Adafruit_Sensor.h>
-#include <Seeed_TMG3993.h>
+#include "Seeed_TMG3993_v2.hpp"
+#include <HT_SSD1306Wire.h>
 #include <Wire.h>
 
 // Pins BME680 en SPI
@@ -9,15 +10,26 @@
 #define BME_MISO 37  // 4
 #define BME_CS 34    // 11
 
+// Pins heartbeat
 #define HB_PIN 1
 
+// Pins TMG3993 en I2C
+#define TMG_SDA 41
+#define TMG_SCL 42
+#define TMG_I2C_FREQ 100000UL
+
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
-TMG3993 tmg3993;
+TMG3993 tmg3993(&Wire1);
+static SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
 
 void setup() {
     // Serial initialization
     Serial.begin(115200);
     Serial.println("Serial is ready");
+
+    // Display initialization
+    display.init();
+    display.setFont(ArialMT_Plain_10);
 
     // BME680 initialization
     while (!bme.begin()) {
@@ -33,7 +45,7 @@ void setup() {
     bme.setGasHeater(320, 150);  // 320 C pendant 150 ms
 
     // TMG3993 initialization
-    Wire.begin();
+    Wire1.begin(TMG_SDA, TMG_SCL, TMG_I2C_FREQ);
 
     Serial.println("Initialisation du TMG3993...");
 
@@ -121,4 +133,9 @@ void loop() {
     int result = analogReadMilliVolts(HB_PIN);
     Serial.print("Heart Beat (mV) : ");
     Serial.println(result);
+
+    display.clear();
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    display.drawString(0, 0, String(result) + " mV");
+    display.display();
 }
