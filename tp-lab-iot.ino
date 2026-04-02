@@ -39,10 +39,13 @@ void setup() {
         Serial.println("Erreur: TMG3993 non detecte. Verifiez le cablage I2C (SDA, SCL) et l'alimentation.");
         delay(1000);
     }
-    Serial.println("TMG3993 detecte");
+    Serial.println("TMG3993 détecté");
 
-    tmg3993.setADCIntegrationTime(0xdb); // the integration time: 103ms
-    tmg3993.enableEngines(ENABLE_PON | ENABLE_AEN | ENABLE_AIEN);
+    tmg3993.setupRecommendedConfigForProximity();
+    tmg3993.setProximityInterruptThreshold(25, 150);  // less than 5cm will trigger the proximity event
+
+    tmg3993.setADCIntegrationTime(0xdb);  // the integration time: 103ms
+    tmg3993.enableEngines(ENABLE_PON | ENABLE_PEN | ENABLE_PIEN | ENABLE_AEN | ENABLE_AIEN);
 }
 
 void loop() {
@@ -76,6 +79,34 @@ void loop() {
 
     // TMG3993 reading
 
+    // Proximity
+    if (tmg3993.getSTATUS() & STATUS_PVALID) {
+        uint8_t proximity_raw = tmg3993.getProximityRaw();  // read the Proximity data will clear the status bit
+
+        Serial.print("Proximity Raw : ");
+        Serial.println(proximity_raw);
+
+        /*if (proximity_raw >= 150 && last_interrupt_state != 1) {
+            Serial.println("Proximity detected!!!");
+            Serial.print("Proximity Raw: ");
+            Serial.println(proximity_raw);
+            last_interrupt_state = 1;
+        } else if (proximity_raw <= 25 && last_interrupt_state != 0) {
+            Serial.println("Proximity removed!!!");
+            Serial.print("Proximity Raw: ");
+            Serial.println(proximity_raw);
+            last_interrupt_state = 0;
+        }*/
+
+        // don't forget to clear the interrupt bits
+        tmg3993.clearProximityInterrupts();
+    } else {
+        Serial.println("TMG3993: No new proximity data");
+    }
+
+    println();
+
+    // Color
     if (tmg3993.getSTATUS() & STATUS_AVALID) {
         uint16_t r, g, b, c;
         int32_t lux, cct;
