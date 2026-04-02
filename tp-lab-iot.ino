@@ -23,15 +23,15 @@ TMG3993 tmg3993(&Wire1);
 static SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
 
 void setup() {
-    // Serial initialization
+    // --- Serial initialization
     Serial.begin(115200);
     Serial.println("Serial is ready");
 
-    // Display initialization
+    // --- Display initialization
     display.init();
     display.setFont(ArialMT_Plain_10);
 
-    // BME680 initialization
+    // --- BME680 initialization
     while (!bme.begin()) {
         Serial.println("Erreur: BME680 non detecte. Verifiez le cablage SPI (CS, MOSI, MISO, SCK) et l'alimentation.");
         delay(1000);
@@ -44,7 +44,7 @@ void setup() {
     bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
     bme.setGasHeater(320, 150);  // 320 C pendant 150 ms
 
-    // TMG3993 initialization
+    // --- TMG3993 initialization
     Wire1.begin(TMG_SDA, TMG_SCL, TMG_I2C_FREQ);
 
     Serial.println("Initialisation du TMG3993...");
@@ -57,85 +57,153 @@ void setup() {
 
     tmg3993.setupRecommendedConfigForProximity();
     tmg3993.setProximityInterruptThreshold(25, 150);  // less than 5cm will trigger the proximity event
-
     tmg3993.setADCIntegrationTime(0xdb);  // the integration time: 103ms
     tmg3993.enableEngines(ENABLE_PON | ENABLE_PEN | ENABLE_PIEN | ENABLE_AEN | ENABLE_AIEN);
+
+    // --- End of setup
+    Serial.println("SETUP_COMPLETE");
 }
 
 void loop() {
-    Serial.println("======================================================");
+    display.clear();
+
+    // ----------------------- GET READINGS -----------------------
 
     // BME680 reading
 
-    if (bme.performReading()) {
-        Serial.print("Temperature: ");
-        Serial.print(bme.temperature);
-        Serial.println(" C");
+    bool bme_reading = bme.performReading();
+    int bme_temperature = NULL;
+    int bme_humidity = NULL;
+    int bme_pressure = NULL;
+    int bme_gas = NULL;
 
-        Serial.print("Humidite: ");
-        Serial.print(bme.humidity);
-        Serial.println(" %");
-
-        Serial.print("Pression: ");
-        Serial.print(bme.pressure / 100.0);
-        Serial.println(" hPa");
-
-        Serial.print("Gaz: ");
-        Serial.print(bme.gas_resistance / 1000.0);
-        Serial.println(" kOhm");
+    if (bme_reading) {
+        bme_temperature = bme.temperature; // °C
+        bme_humidity = bme.humidity; // %
+        bme_pressure = bme.pressure / 100.0; // hPa
+        bme_gas = bme.gas_resistance / 1000.0; // kOhm
     }
-
-    Serial.println();
 
     // TMG3993 reading
 
     // Proximity
-    if (tmg3993.getSTATUS() & STATUS_PVALID) {
-        uint8_t proximity_raw = tmg3993.getProximityRaw();  // read the Proximity data will clear the status bit
+    bool tmg3993_proximity = tmg3993.getSTATUS() & STATUS_PVALID;
+    uint8_t tmg3993_proximity_raw = NULL;
 
-        Serial.print("Proximity Raw : ");
-        Serial.println(proximity_raw);
-
-        // don't forget to clear the interrupt bits
+    if (tmg3993_proximity) {
+        tmg3993_proximity_raw = tmg3993.getProximityRaw();
         tmg3993.clearProximityInterrupts();
     }
 
-    Serial.println();
-
     // Color
-    if (tmg3993.getSTATUS() & STATUS_AVALID) {
-        uint16_t r, g, b, c;
-        int32_t lux, cct;
-        tmg3993.getRGBCRaw(&r, &g, &b, &c);
-        lux = tmg3993.getLux(r, g, b, c);
-        // the calculation of CCT is just from the `Application Note`,
-        // from the result of our test, it might have error.
-        cct = tmg3993.getCCT(r, g, b, c);
-        Serial.print("RGBC Data: ");
-        Serial.print(r);
-        Serial.print(" ");
-        Serial.print(g);
-        Serial.print(" ");
-        Serial.print(b);
-        Serial.print(" ");
-        Serial.println(c);
-        Serial.print("Lux: ");
-        Serial.print(lux);
-        Serial.print(" ");
-        Serial.print("CCT: ");
-        Serial.println(cct);
-        // don't forget to clear the interrupt bits
+    bool tmg3993_color = tmg3993.getSTATUS() & STATUS_AVALID;
+    uint16_t tmg3993_r = NULL;
+    uint16_t tmg3993_g = NULL;
+    uint16_t tmg3993_b = NULL;
+    uint16_t tmg3993_c = NULL;
+    int32_t tmg3993_lux = NULL;
+    int32_t tmg3993_cct = NULL;
+
+    if (tmg3993_color) {
+        tmg3993.getRGBCRaw(&tmg3993_r, &tmg3993_g, &tmg3993_b, &tmg3993_c);
+        tmg3993_lux = tmg3993.getLux(tmg3993_r, tmg3993_g, tmg3993_b, tmg3993_c);
+        tmg3993_cct = tmg3993.getCCT(tmg3993_r, tmg3993_g, tmg3993_b, tmg3993_c);
         tmg3993.clearALSInterrupts();
     }
 
-    Serial.println();
+    // Heartbeat reading
 
-    int result = analogReadMilliVolts(HB_PIN);
-    Serial.print("Heart Beat (mV) : ");
-    Serial.println(result);
+    int heartbeat = analogReadMilliVolts(HB_PIN);
 
-    display.clear();
+    // ----------------------- DISPLAY READINGS -----------------------
+    
+    // Left side
+
     display.setTextAlignment(TEXT_ALIGN_LEFT);
-    display.drawString(0, 0, String(result) + " mV");
+
+    // BME680
+    if (bme_reading) {
+        display.drawString(0, 0, "Tp: " + String(bme_temperature) + " C");
+        display.drawString(0, 10, "Hum: " + String(bme_humidity) + " %");
+        display.drawString(0, 20, "Press: " + String(bme_pressure) + " hPa");
+        display.drawString(0, 30, "Gas: " + String(bme_gas) + " kOhm");
+    } else {
+        display.drawString(0, 0, "BME680 reading failed");
+    }
+
+    // TMG3993 Proximity
+    if (tmg3993_proximity) {
+        display.drawString(0, 50, "Proximity: " + String(tmg3993_proximity_raw));
+    } else {
+        display.drawString(0, 50, "Proximity reading failed");
+    }
+
+    // Right side
+
+    display.setTextAlignment(TEXT_ALIGN_RIGHT);
+
+    // TMG3993 Color
+    if (tmg3993_color) {
+        display.drawString(127, 0, "rgb(" + String(tmg3993_r) + "," + String(tmg3993_g) + "," + String(tmg3993_b) + ")");
+        display.drawString(127, 10, "C=" + String(tmg3993_c));
+        display.drawString(127, 20, String(tmg3993_lux) + " lux");
+        display.drawString(127, 30, String(tmg3993_cct) + " K");
+    } else {
+        display.drawString(127, 0, "Color reading failed");
+    }
+
+    // Heartbeat
+    display.drawString(127, 50, "HB: " + String(heartbeat) + " mV");
+
     display.display();
+
+    // ----------------------- JSON GENERATION -----------------------
+    String json;
+    json.reserve(420);
+
+    json += "{";
+    json += "\"uptime\":" + String(millis());
+    json += ",\"heartbeat\":" + String(heartbeat);
+
+    json += ",\"bme\":";
+    if (bme_reading) {
+        json += "{";
+        json += "\"temperature\":" + String(bme.temperature, 2);
+        json += ",\"humidity\":" + String(bme.humidity, 2);
+        json += ",\"pressure\":" + String(bme.pressure / 100.0, 2);
+        json += ",\"gas\":" + String(bme.gas_resistance / 1000.0, 2);
+        json += "}";
+    } else {
+        json += "null";
+    }
+
+    json += ",\"tmg\":{";
+    json += "\"proximity\":";
+    if (tmg3993_proximity) {
+        json += String(tmg3993_proximity_raw);
+    } else {
+        json += "null";
+    }
+
+    json += ",\"color\":";
+    if (tmg3993_color) {
+        json += "{";
+        json += "\"red\":" + String(tmg3993_r);
+        json += ",\"green\":" + String(tmg3993_g);
+        json += ",\"blue\":" + String(tmg3993_b);
+        json += ",\"clear\":" + String(tmg3993_c);
+        json += ",\"lux\":" + String(tmg3993_lux);
+        json += ",\"cct\":" + String(tmg3993_cct);
+        json += "}";
+    } else {
+        json += "null";
+    }
+
+    json += "}}";
+
+    // ------------------------ SERIAL OUTPUT -----------------------
+    Serial.println(json);
+
+    // ------------------------ LORA OUTPUT -----------------------
+
 }
