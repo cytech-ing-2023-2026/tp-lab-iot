@@ -50,9 +50,6 @@ void setup() {
     tmg3993.enableEngines(ENABLE_PON | ENABLE_PEN | ENABLE_PIEN | ENABLE_AEN | ENABLE_AIEN);
 }
 
-int sum = 0;
-int i = 1;
-
 void loop() {
     Serial.println("======================================================");
 
@@ -121,15 +118,7 @@ void loop() {
 
     Serial.println();
 
-    sum += analogReadMilliVolts(HB_PIN);
-    i++;
-
-    if(i == 10) {
-        Serial.print("Heart Beat (mV) (mean) : ");
-        Serial.println(sum / 10.0);
-        i = 0;
-        sum = 0;
-    }
-
-    delay(500);
+    int result = analogReadMilliVolts(HB_PIN);
+    Serial.print("Heart Beat (mV) : ");
+    Serial.println(result);
 }
