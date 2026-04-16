@@ -8,9 +8,9 @@
 #include <WebSocketsServer.h>
 
 // Inclue Wi-Fi credentials
-#include "secrets.h"
+#include "src/wifi/wifi-credentials.h"
 // Include web page
-#include "web-root-html.h"
+#include "src/html/web-root.h"
 
 // Pins BME680 en SPI
 #define BME_SCK 36   // 9

@@ -1,8 +1,9 @@
 # Ignore Visual Studio Code settings folder
 .vscode/
 
-# Local Wi-Fi secrets
-secrets.h
+# --- Generated/configuration files ---
 
-# Web root HTML file
-web-root-html.h
+# Local Wi-Fi secrets
+src/wifi/wifi-credentials.h
+# Web Root HTML file
+src/html/web-root.h

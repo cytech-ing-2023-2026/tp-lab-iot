@@ -1,8 +1,8 @@
 #!/usr/bin/bash
 set -euo pipefail
 
-input_file="${1:-web-root.html}"
-output_file="${2:-web-root-html.h}"
+input_file="src/html/web-root.html"
+output_file="src/html/web-root.h"
 
 if [ ! -f "$input_file" ]; then
   echo "Input file not found: $input_file" >&2
