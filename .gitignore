@@ -3,3 +3,6 @@
 
 # Local Wi-Fi secrets
 secrets.h
+
+# Web root HTML file
+web-root-html.h

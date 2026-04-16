@@ -6,7 +6,11 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <WebSocketsServer.h>
+
+// Inclue Wi-Fi credentials
 #include "secrets.h"
+// Include web page
+#include "web-root-html.h"
 
 // Pins BME680 en SPI
 #define BME_SCK 36   // 9
@@ -24,7 +28,6 @@
 
 // WebSocket settings
 #define WS_PORT 81
-#define JSON_PUSH_INTERVAL_MS 250UL
 
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 TMG3993 tmg3993(&Wire1);
@@ -35,17 +38,11 @@ WebServer server(80);
 WebSocketsServer webSocket(WS_PORT);
 String latestJson = "{}";
 bool webServerEnabled = false;
-unsigned long lastJsonPushMs = 0;
 
 void handleRoot() {
-    String body = "Serveur IoT actif\n";
-    body += "Flux JSON temps reel via WebSocket\n";
-    if (WiFi.status() == WL_CONNECTED) {
-        body += "IP: " + WiFi.localIP().toString() + "\n";
-        body += "WebSocket: ws://" + WiFi.localIP().toString() + ":" + String(WS_PORT) + "/\n";
-        body += "Frequence push: " + String(JSON_PUSH_INTERVAL_MS) + " ms\n";
-    }
-    server.send(200, "text/plain; charset=utf-8", body);
+    String html = FPSTR(WEB_ROOT_HTML);
+    html.replace("__WS_PORT__", String(WS_PORT));
+    server.send(200, "text/html; charset=utf-8", html);
 }
 void handleNotFound() {
     server.send(404, "application/json", "{\"error\":\"not_found\"}");
@@ -302,10 +299,6 @@ void loop() {
     latestJson = json;
 
     if (webServerEnabled) {
-        const unsigned long now = millis();
-        if ((now - lastJsonPushMs) >= JSON_PUSH_INTERVAL_MS) {
-            webSocket.broadcastTXT(latestJson);
-            lastJsonPushMs = now;
-        }
+        webSocket.broadcastTXT(latestJson);
     }
 }

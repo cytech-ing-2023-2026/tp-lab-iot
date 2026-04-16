@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="fr">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>TP IoT - Flux JSON Live</title>
+	<style>
+		:root {
+			--bg: #0d1321;
+			--card: #1d2d44;
+			--card2: #22395e;
+			--txt: #f3f6fb;
+			--muted: #adc3de;
+			--ok: #79e8a1;
+			--warn: #ffd166;
+		}
+		* { box-sizing: border-box; }
+		body {
+			margin: 0;
+			min-height: 100vh;
+			color: var(--txt);
+			font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+			background: radial-gradient(1200px 600px at 10% 0%, #1b2f4f, var(--bg));
+			display: grid;
+			place-items: center;
+			padding: 16px;
+		}
+		.card {
+			width: min(900px, 100%);
+			border: 1px solid #31507f;
+			border-radius: 14px;
+			background: linear-gradient(160deg, var(--card), var(--card2));
+			box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+			overflow: hidden;
+		}
+		.head {
+			padding: 14px 16px;
+			border-bottom: 1px solid #31507f;
+			display: flex;
+			justify-content: space-between;
+			gap: 12px;
+			flex-wrap: wrap;
+		}
+		.title { font-size: 15px; font-weight: 700; }
+		.meta { color: var(--muted); font-size: 12px; }
+		.status { color: var(--warn); font-size: 12px; }
+		pre {
+			margin: 0;
+			padding: 16px;
+			max-height: 68vh;
+			overflow: auto;
+			line-height: 1.45;
+			font-size: 13px;
+			white-space: pre-wrap;
+			word-break: break-word;
+		}
+	</style>
+</head>
+<body>
+	<main class="card">
+		<section class="head">
+			<div>
+				<div class="title">Flux capteurs JSON en direct</div>
+				<div class="meta" id="socketUrl">ws://...</div>
+			</div>
+			<div>
+				<div class="status" id="status">Connexion...</div>
+				<div class="meta" id="lastUpdate">Dernière mise à jour: -</div>
+			</div>
+		</section>
+		<pre id="jsonOutput">En attente de données...</pre>
+	</main>
+
+	<script>
+		const WS_PORT = __WS_PORT__;
+		const statusEl = document.getElementById('status');
+		const socketUrlEl = document.getElementById('socketUrl');
+		const jsonEl = document.getElementById('jsonOutput');
+		const lastUpdateEl = document.getElementById('lastUpdate');
+
+		let socket;
+
+		function connect() {
+			const wsUrl = `ws://${window.location.hostname}:${WS_PORT}/`;
+			socketUrlEl.textContent = wsUrl;
+			statusEl.textContent = 'Connexion...';
+
+			socket = new WebSocket(wsUrl);
+
+			socket.onopen = () => {
+				statusEl.textContent = 'Connecte';
+				statusEl.style.color = '#79e8a1';
+			};
+
+			socket.onmessage = (event) => {
+				try {
+					const parsed = JSON.parse(event.data);
+					jsonEl.textContent = JSON.stringify(parsed, null, 2);
+				} catch (e) {
+					jsonEl.textContent = event.data;
+				}
+				const now = new Date();
+				lastUpdateEl.textContent = `Dernière mise à jour : ${now.toLocaleTimeString()}`;
+			};
+
+			socket.onerror = () => {
+				statusEl.textContent = 'Erreur socket';
+				statusEl.style.color = '#ffd166';
+			};
+
+			socket.onclose = () => {
+				statusEl.textContent = 'Déconnecté, reconnexion...';
+				statusEl.style.color = '#ffd166';
+				setTimeout(connect, 1000);
+			};
+		}
+
+		connect();
+	</script>
+</body>
+</html>
