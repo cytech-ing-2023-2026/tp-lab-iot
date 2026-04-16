@@ -5,7 +5,12 @@
 #include <Wire.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <WebSocketsServer.h>
+
+// Inclue Wi-Fi credentials
 #include "secrets.h"
+// Include web page
+#include "web-root-html.h"
 
 // Pins BME680 en SPI
 #define BME_SCK 36   // 9
@@ -21,29 +26,39 @@
 #define TMG_SCL 42
 #define TMG_I2C_FREQ 100000UL
 
+// WebSocket settings
+#define WS_PORT 81
+
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 TMG3993 tmg3993(&Wire1);
 static SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
 
 // Embedded web server
 WebServer server(80);
+WebSocketsServer webSocket(WS_PORT);
 String latestJson = "{}";
 bool webServerEnabled = false;
 
 void handleRoot() {
-    String body = "Serveur IoT actif\n";
-    body += "Endpoint JSON: /json\n";
-    if (WiFi.status() == WL_CONNECTED) {
-        body += "IP: " + WiFi.localIP().toString() + "\n";
-    }
-    server.send(200, "text/plain; charset=utf-8", body);
-}
-void handleJson() {
-    server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json", latestJson);
+    String html = FPSTR(WEB_ROOT_HTML);
+    html.replace("__WS_PORT__", String(WS_PORT));
+    server.send(200, "text/html; charset=utf-8", html);
 }
 void handleNotFound() {
     server.send(404, "application/json", "{\"error\":\"not_found\"}");
+}
+
+void handleWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t* payload, size_t length) {
+    (void)payload;
+    (void)length;
+
+    if (type == WStype_CONNECTED) {
+        IPAddress ip = webSocket.remoteIP(clientNum);
+        Serial.printf("[WS] Client %u connecte (%s)\n", clientNum, ip.toString().c_str());
+        webSocket.sendTXT(clientNum, latestJson);
+    } else if (type == WStype_DISCONNECTED) {
+        Serial.printf("[WS] Client %u deconnecte\n", clientNum);
+    }
 }
 
 // ----------------------- SETUP & LOOP ----------------------
@@ -102,16 +117,19 @@ void setup() {
 
     if (WiFi.status() == WL_CONNECTED) {
         server.on("/", HTTP_GET, handleRoot);
-        server.on("/json", HTTP_GET, handleJson);
         server.onNotFound(handleNotFound);
         server.begin();
+
+        webSocket.begin();
+        webSocket.onEvent(handleWebSocketEvent);
         webServerEnabled = true;
 
         Serial.print("Wi-Fi connecte, IP: ");
         Serial.println(WiFi.localIP());
         Serial.println("Serveur web demarre sur le port 80");
+        Serial.printf("WebSocket demarre sur le port %u\n", WS_PORT);
     } else {
-        Serial.println("Wi-Fi non connecte, serveur web désactivé");
+        Serial.println("Wi-Fi non connecte, services web desactives");
     }
 
     // --- End of setup
@@ -121,6 +139,7 @@ void setup() {
 void loop() {
     if (webServerEnabled) {
         server.handleClient();
+        webSocket.loop();
     }
 
     display.clear();
@@ -219,9 +238,9 @@ void loop() {
 
     // Web server status
     if (webServerEnabled) {
-        display.drawString(127, 40, "Web: ON");
+        display.drawString(127, 40, "WS: ON");
     } else {
-        display.drawString(127, 40, "Web: OFF");
+        display.drawString(127, 40, "WS: OFF");
     }
 
     // Heartbeat
@@ -278,4 +297,8 @@ void loop() {
 
     // ------------------------ WEB OUTPUT -----------------------
     latestJson = json;
+
+    if (webServerEnabled) {
+        webSocket.broadcastTXT(latestJson);
+    }
 }
