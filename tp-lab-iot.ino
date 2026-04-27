@@ -21,6 +21,11 @@
 // Pins heartbeat
 #define HB_PIN 1
 
+// Pins KY-023 joystick
+#define JOY_X_PIN 7
+#define JOY_Y_PIN 6
+#define JOY_SW_PIN 5
+
 // Pins TMG3993 en I2C
 #define TMG_SDA 41
 #define TMG_SCL 42
@@ -101,7 +106,13 @@ void setup() {
     tmg3993.setADCIntegrationTime(0xdb);  // the integration time: 103ms
     tmg3993.enableEngines(ENABLE_PON | ENABLE_PEN | ENABLE_PIEN | ENABLE_AEN | ENABLE_AIEN);
 
+    // --- KY-023 initialization
+    pinMode(JOY_SW_PIN, INPUT_PULLUP);
+
     // --- Wi-Fi + embedded web server initialization
+	
+	// Wi-Fi
+
     WiFi.mode(WIFI_STA);
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
@@ -114,6 +125,8 @@ void setup() {
         delay(500);
     }
     Serial.println();
+
+	// Web server
 
     if (WiFi.status() == WL_CONNECTED) {
         server.on("/", HTTP_GET, handleRoot);
@@ -189,8 +202,12 @@ void loop() {
     }
 
     // Heartbeat reading
-
     int heartbeat = analogReadMilliVolts(HB_PIN);
+
+    // KY-023 joystick reading
+    int joystick_x = analogRead(JOY_X_PIN);
+    int joystick_y = analogRead(JOY_Y_PIN);
+    bool joystick_pressed = digitalRead(JOY_SW_PIN) == LOW;
 
     // ----------------------- DISPLAY READINGS -----------------------
     
@@ -243,18 +260,23 @@ void loop() {
         display.drawString(127, 40, "WS: OFF");
     }
 
-    // Heartbeat
-    display.drawString(127, 50, "HB: " + String(heartbeat) + " mV");
+    // Heartbeat + joystick button
+    display.drawString(127, 50, "HB: " + String(heartbeat) + " " + (joystick_pressed ? "J:P" : "J:R"));
 
     display.display();
 
     // ----------------------- JSON GENERATION -----------------------
     String json;
-    json.reserve(420);
+    json.reserve(560);
 
     json += "{";
     json += "\"uptime\":" + String(millis());
     json += ",\"heartbeat\":" + String(heartbeat);
+    json += ",\"joystick\":{";
+    json += "\"x\":" + String(joystick_x);
+    json += ",\"y\":" + String(joystick_y);
+    json += ",\"pressed\":" + String(joystick_pressed ? "true" : "false");
+    json += "}";
 
     json += ",\"bme\":";
     if (bme_reading) {
@@ -293,7 +315,7 @@ void loop() {
     json += "}}";
 
     // ------------------------ SERIAL OUTPUT -----------------------
-    Serial.println(json);
+	Serial.println("JSON:" + json);
 
     // ------------------------ WEB OUTPUT -----------------------
     latestJson = json;
