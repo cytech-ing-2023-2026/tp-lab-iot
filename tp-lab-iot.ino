@@ -101,7 +101,7 @@ void taskBME680(void *pvParameters) {
             }
             xSemaphoreGive(dataMutex);
         }
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
 }
 
@@ -377,6 +377,4 @@ void loop() {
     if (webServerEnabled) {
         webSocket.broadcastTXT(latestJson);
     }
-
-    delay(10);
 }
