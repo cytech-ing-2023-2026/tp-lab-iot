@@ -34,6 +34,25 @@
 // WebSocket settings
 #define WS_PORT 81
 
+SemaphoreHandle_t dataMutex;
+
+struct SensorData {
+    // BME
+    bool bme_reading;
+    float bme_temp, bme_hum, bme_press, bme_gas;
+    // TMG Proximity
+    bool tmg_proximity;
+    uint8_t tmg_proximity_raw;
+    // TMG Color
+    bool tmg_color;
+    uint16_t tmg_r, tmg_g, tmg_b, tmg_c;
+    int32_t tmg_lux, tmg_cct;
+    // Analog
+    int heartbeat;
+    int joystick_x, joystick_y;
+    bool joystick_pressed;
+} sensorData;
+
 Adafruit_BME680 bme(BME_CS, BME_MOSI, BME_MISO, BME_SCK);
 TMG3993 tmg3993(&Wire1);
 static SSD1306Wire display(0x3c, 500000, SDA_OLED, SCL_OLED, GEOMETRY_128_64, RST_OLED);
@@ -63,6 +82,79 @@ void handleWebSocketEvent(uint8_t clientNum, WStype_t type, uint8_t* payload, si
         webSocket.sendTXT(clientNum, latestJson);
     } else if (type == WStype_DISCONNECTED) {
         Serial.printf("[WS] Client %u deconnecte\n", clientNum);
+    }
+}
+
+// ----------------------- FREERTOS TASKS --------------------
+
+void taskBME680(void *pvParameters) {
+    for (;;) {
+        bool reading = bme.performReading();
+        
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+            sensorData.bme_reading = reading;
+            if (reading) {
+                sensorData.bme_temp = bme.temperature;
+                sensorData.bme_hum = bme.humidity;
+                sensorData.bme_press = bme.pressure / 100.0;
+                sensorData.bme_gas = bme.gas_resistance / 1000.0;
+            }
+            xSemaphoreGive(dataMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
+    }
+}
+
+void taskTMG3993(void *pvParameters) {
+    for (;;) {
+        bool prox_valid = tmg3993.getSTATUS() & STATUS_PVALID;
+        uint8_t prox_raw = 0;
+        if (prox_valid) {
+            prox_raw = tmg3993.getProximityRaw();
+            tmg3993.clearProximityInterrupts();
+        }
+
+        bool color_valid = tmg3993.getSTATUS() & STATUS_AVALID;
+        uint16_t r = 0, g = 0, b = 0, c = 0;
+        int32_t lux = 0, cct = 0;
+        if (color_valid) {
+            tmg3993.getRGBCRaw(&r, &g, &b, &c);
+            lux = tmg3993.getLux(r, g, b, c);
+            cct = tmg3993.getCCT(r, g, b, c);
+            tmg3993.clearALSInterrupts();
+        }
+
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+            sensorData.tmg_proximity = prox_valid;
+            if (prox_valid) sensorData.tmg_proximity_raw = prox_raw;
+
+            sensorData.tmg_color = color_valid;
+            if (color_valid) {
+                sensorData.tmg_r = r; sensorData.tmg_g = g;
+                sensorData.tmg_b = b; sensorData.tmg_c = c;
+                sensorData.tmg_lux = lux; sensorData.tmg_cct = cct;
+            }
+            xSemaphoreGive(dataMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(150));
+    }
+}
+
+void taskAnalogInputs(void *pvParameters) {
+    for (;;) {
+        int hb = analogReadMilliVolts(HB_PIN);
+        int jx = analogRead(JOY_X_PIN);
+        int jy = analogRead(JOY_Y_PIN);
+        bool jsw = digitalRead(JOY_SW_PIN) == LOW;
+
+        if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+            sensorData.heartbeat = hb;
+            sensorData.joystick_x = jx;
+            sensorData.joystick_y = jy;
+            sensorData.joystick_pressed = jsw;
+            xSemaphoreGive(dataMutex);
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -145,6 +237,13 @@ void setup() {
         Serial.println("Wi-Fi non connecte, services web desactives");
     }
 
+    // --- FreeRTOS Tasks Start
+    dataMutex = xSemaphoreCreateMutex();
+    
+    xTaskCreatePinnedToCore(taskBME680, "BME_Task", 4096, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskTMG3993, "TMG_Task", 4096, NULL, 1, NULL, 1);
+    xTaskCreatePinnedToCore(taskAnalogInputs, "Analog_Task", 2048, NULL, 1, NULL, 1);
+
     // --- End of setup
     Serial.println("SETUP_COMPLETE");
 }
@@ -155,59 +254,14 @@ void loop() {
         webSocket.loop();
     }
 
+    // Lire les donnees protegees par le mutex et faire une copie locale
+    SensorData localData;
+    if (xSemaphoreTake(dataMutex, portMAX_DELAY) == pdTRUE) {
+        localData = sensorData;
+        xSemaphoreGive(dataMutex);
+    }
+
     display.clear();
-
-    // ----------------------- GET READINGS -----------------------
-
-    // BME680 reading
-
-    bool bme_reading = bme.performReading();
-    int bme_temperature = NULL;
-    int bme_humidity = NULL;
-    int bme_pressure = NULL;
-    int bme_gas = NULL;
-
-    if (bme_reading) {
-        bme_temperature = bme.temperature; // °C
-        bme_humidity = bme.humidity; // %
-        bme_pressure = bme.pressure / 100.0; // hPa
-        bme_gas = bme.gas_resistance / 1000.0; // kOhm
-    }
-
-    // TMG3993 reading
-
-    // Proximity
-    bool tmg3993_proximity = tmg3993.getSTATUS() & STATUS_PVALID;
-    uint8_t tmg3993_proximity_raw = NULL;
-
-    if (tmg3993_proximity) {
-        tmg3993_proximity_raw = tmg3993.getProximityRaw();
-        tmg3993.clearProximityInterrupts();
-    }
-
-    // Color
-    bool tmg3993_color = tmg3993.getSTATUS() & STATUS_AVALID;
-    uint16_t tmg3993_r = NULL;
-    uint16_t tmg3993_g = NULL;
-    uint16_t tmg3993_b = NULL;
-    uint16_t tmg3993_c = NULL;
-    int32_t tmg3993_lux = NULL;
-    int32_t tmg3993_cct = NULL;
-
-    if (tmg3993_color) {
-        tmg3993.getRGBCRaw(&tmg3993_r, &tmg3993_g, &tmg3993_b, &tmg3993_c);
-        tmg3993_lux = tmg3993.getLux(tmg3993_r, tmg3993_g, tmg3993_b, tmg3993_c);
-        tmg3993_cct = tmg3993.getCCT(tmg3993_r, tmg3993_g, tmg3993_b, tmg3993_c);
-        tmg3993.clearALSInterrupts();
-    }
-
-    // Heartbeat reading
-    int heartbeat = analogReadMilliVolts(HB_PIN);
-
-    // KY-023 joystick reading
-    int joystick_x = analogRead(JOY_X_PIN);
-    int joystick_y = analogRead(JOY_Y_PIN);
-    bool joystick_pressed = digitalRead(JOY_SW_PIN) == LOW;
 
     // ----------------------- DISPLAY READINGS -----------------------
     
@@ -216,11 +270,11 @@ void loop() {
     display.setTextAlignment(TEXT_ALIGN_LEFT);
 
     // BME680
-    if (bme_reading) {
-        display.drawString(0, 0, "Tp: " + String(bme_temperature) + " C");
-        display.drawString(0, 10, "Hum: " + String(bme_humidity) + " %");
-        display.drawString(0, 20, "Press: " + String(bme_pressure) + " hPa");
-        display.drawString(0, 30, "Gas: " + String(bme_gas) + " kOhm");
+    if (localData.bme_reading) {
+        display.drawString(0, 0, "Tp: " + String(localData.bme_temp) + " C");
+        display.drawString(0, 10, "Hum: " + String(localData.bme_hum) + " %");
+        display.drawString(0, 20, "Press: " + String(localData.bme_press) + " hPa");
+        display.drawString(0, 30, "Gas: " + String(localData.bme_gas) + " kOhm");
     } else {
         display.drawString(0, 0, "BME680 reading failed");
     }
@@ -233,8 +287,8 @@ void loop() {
     }
 
     // TMG3993 Proximity
-    if (tmg3993_proximity) {
-        display.drawString(0, 50, "Proximity: " + String(tmg3993_proximity_raw));
+    if (localData.tmg_proximity) {
+        display.drawString(0, 50, "Proximity: " + String(localData.tmg_proximity_raw));
     } else {
         display.drawString(0, 50, "Proximity reading failed");
     }
@@ -244,11 +298,11 @@ void loop() {
     display.setTextAlignment(TEXT_ALIGN_RIGHT);
 
     // TMG3993 Color
-    if (tmg3993_color) {
-        display.drawString(127, 0, "rgb(" + String(tmg3993_r) + "," + String(tmg3993_g) + "," + String(tmg3993_b) + ")");
-        display.drawString(127, 10, "C=" + String(tmg3993_c));
-        display.drawString(127, 20, String(tmg3993_lux) + " lux");
-        display.drawString(127, 30, String(tmg3993_cct) + " K");
+    if (localData.tmg_color) {
+        display.drawString(127, 0, "rgb(" + String(localData.tmg_r) + "," + String(localData.tmg_g) + "," + String(localData.tmg_b) + ")");
+        display.drawString(127, 10, "C=" + String(localData.tmg_c));
+        display.drawString(127, 20, String(localData.tmg_lux) + " lux");
+        display.drawString(127, 30, String(localData.tmg_cct) + " K");
     } else {
         display.drawString(127, 0, "Color reading failed");
     }
@@ -261,7 +315,7 @@ void loop() {
     }
 
     // Heartbeat + joystick button
-    display.drawString(127, 50, "HB: " + String(heartbeat) + " " + (joystick_pressed ? "J:P" : "J:R"));
+    display.drawString(127, 50, "HB: " + String(localData.heartbeat) + " " + (localData.joystick_pressed ? "J:P" : "J:R"));
 
     display.display();
 
@@ -271,20 +325,20 @@ void loop() {
 
     json += "{";
     json += "\"uptime\":" + String(millis());
-    json += ",\"heartbeat\":" + String(heartbeat);
+    json += ",\"heartbeat\":" + String(localData.heartbeat);
     json += ",\"joystick\":{";
-    json += "\"x\":" + String(joystick_x);
-    json += ",\"y\":" + String(joystick_y);
-    json += ",\"pressed\":" + String(joystick_pressed ? "true" : "false");
+    json += "\"x\":" + String(localData.joystick_x);
+    json += ",\"y\":" + String(localData.joystick_y);
+    json += ",\"pressed\":" + String(localData.joystick_pressed ? "true" : "false");
     json += "}";
 
     json += ",\"bme\":";
-    if (bme_reading) {
+    if (localData.bme_reading) {
         json += "{";
-        json += "\"temperature\":" + String(bme.temperature, 2);
-        json += ",\"humidity\":" + String(bme.humidity, 2);
-        json += ",\"pressure\":" + String(bme.pressure / 100.0, 2);
-        json += ",\"gas\":" + String(bme.gas_resistance / 1000.0, 2);
+        json += "\"temperature\":" + String(localData.bme_temp, 2);
+        json += ",\"humidity\":" + String(localData.bme_hum, 2);
+        json += ",\"pressure\":" + String(localData.bme_press, 2);
+        json += ",\"gas\":" + String(localData.bme_gas, 2);
         json += "}";
     } else {
         json += "null";
@@ -292,21 +346,21 @@ void loop() {
 
     json += ",\"tmg\":{";
     json += "\"proximity\":";
-    if (tmg3993_proximity) {
-        json += String(tmg3993_proximity_raw);
+    if (localData.tmg_proximity) {
+        json += String(localData.tmg_proximity_raw);
     } else {
         json += "null";
     }
 
     json += ",\"color\":";
-    if (tmg3993_color) {
+    if (localData.tmg_color) {
         json += "{";
-        json += "\"red\":" + String(tmg3993_r);
-        json += ",\"green\":" + String(tmg3993_g);
-        json += ",\"blue\":" + String(tmg3993_b);
-        json += ",\"clear\":" + String(tmg3993_c);
-        json += ",\"lux\":" + String(tmg3993_lux);
-        json += ",\"cct\":" + String(tmg3993_cct);
+        json += "\"red\":" + String(localData.tmg_r);
+        json += ",\"green\":" + String(localData.tmg_g);
+        json += ",\"blue\":" + String(localData.tmg_b);
+        json += ",\"clear\":" + String(localData.tmg_c);
+        json += ",\"lux\":" + String(localData.tmg_lux);
+        json += ",\"cct\":" + String(localData.tmg_cct);
         json += "}";
     } else {
         json += "null";
